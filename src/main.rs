@@ -1,6 +1,8 @@
+use std::rc::Rc;
 use pixels::{Pixels, SurfaceTexture};
+use wasm_bindgen::JsCast;
 use winit::{
-    event::Event,
+    event::{Event, WindowEvent},
     event_loop::EventLoop,
     window::{WindowBuilder, Window},
     dpi::LogicalSize,
@@ -16,26 +18,34 @@ fn main() {
 }
 
 async fn run() {
+    use winit::platform::web::EventLoopExtWebSys;
+
     let event_loop = EventLoop::new();
 
     let window = WindowBuilder::new()
         .with_title("cerise")
         .build(&event_loop)
         .unwrap();
-    
-    insert_canvas(&window);
+    let window = Rc::new(window);
+
+    insert_canvas(Rc::clone(&window));
     
     let mut pixels = {
         let window_size = window.inner_size();
-        let surface_texture = SurfaceTexture::new(window_size.width, window_size.height, &window);
+        let surface_texture = SurfaceTexture::new(window_size.width, window_size.height, window.as_ref());
         Pixels::new_async(WIDTH, HEIGHT, surface_texture).await.unwrap()
     }; 
     
-    let mut first_render = true;
-    event_loop.run(move |event, _, control_flow| {
+    event_loop.spawn(move |event, _, control_flow| {
         control_flow.set_wait();
 
         match event {
+            Event::WindowEvent { 
+                event: WindowEvent::Resized(size),
+                ..
+            } => {
+                pixels.resize_surface(size.width, size.height).unwrap();
+            },
             Event::RedrawRequested(_) => {
                 for (i, pixel) in pixels.frame_mut().chunks_exact_mut(4).enumerate() {
                     let x = (i % WIDTH as usize) as i16;
@@ -54,14 +64,11 @@ async fn run() {
             _ => ()
         };
         
-        if first_render {
-            window.request_redraw();
-            first_render = false;
-        }
+        window.request_redraw();
     });
 }
 
-fn insert_canvas(window: &Window) {
+fn insert_canvas(window: Rc<Window>) {
     use winit::platform::web::WindowExtWebSys;
     
     let canvas = window.canvas();
@@ -75,8 +82,7 @@ fn insert_canvas(window: &Window) {
         )
     };
     
-    let size = get_window_size();
-    window.set_inner_size(size);
+    window.set_inner_size(get_window_size());
     
     let client_window = web_sys::window().unwrap();
     
@@ -86,4 +92,14 @@ fn insert_canvas(window: &Window) {
             body.append_child(&web_sys::Element::from(canvas)).ok()
         })
         .unwrap();
+
+    // create a closure to resize winit window when browser is resized
+    let closure = wasm_bindgen::closure::Closure::<dyn FnMut(_)>::new(move |_e: web_sys::Event| {
+        let size = get_window_size();
+        window.set_inner_size(size)
+    });
+    client_window
+        .add_event_listener_with_callback("resize", closure.as_ref().unchecked_ref())
+        .unwrap();
+    closure.forget();
 }
