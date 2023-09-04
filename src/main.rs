@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{rc::Rc, sync::Mutex};
 use pixels::{Pixels, SurfaceTexture};
 use wasm_bindgen::JsCast;
 use winit::{
@@ -11,6 +11,9 @@ use winit::{
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 480;
 const PADDING: u32 = 30;
+
+const RESIZE_DEBOUNCE_MS: i32 = 100;
+static RESIZE_TIMEOUT_ID: Mutex<i32> = Mutex::new(0);
 
 fn main() {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
@@ -94,9 +97,18 @@ fn insert_canvas(window: Rc<Window>) {
         .unwrap();
 
     // create a closure to resize winit window when browser is resized
-    let closure = wasm_bindgen::closure::Closure::<dyn FnMut(_)>::new(move |_e: web_sys::Event| {
+    let resize = wasm_bindgen::closure::Closure::<dyn FnMut(_)>::new(move |_e: web_sys::Event| {
         let size = get_window_size();
         window.set_inner_size(size)
+    });
+    let closure = wasm_bindgen::closure::Closure::<dyn FnMut(_)>::new(move |_e: web_sys::Event| {
+        let client_window = web_sys::window().unwrap();
+        let mut handle = RESIZE_TIMEOUT_ID.lock().unwrap();
+        client_window.clear_timeout_with_handle(*handle);
+        *handle = client_window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            resize.as_ref().unchecked_ref(),
+            RESIZE_DEBOUNCE_MS
+        ).unwrap();
     });
     client_window
         .add_event_listener_with_callback("resize", closure.as_ref().unchecked_ref())
