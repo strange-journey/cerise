@@ -19,6 +19,7 @@ jobs:
       # install wasm toolchain with rustup
       - uses: actions-rs/toolchain@v1
         with:
+          toolchain: stable
           target: wasm32-unknown-unknown
 
       # install trunk and wasm-bindgen-cli
