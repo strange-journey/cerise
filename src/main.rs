@@ -1,12 +1,20 @@
+mod ui;
+mod util;
+mod synth;
+
 use std::{rc::Rc, sync::Mutex};
+use hecs::World;
 use pixels::{Pixels, SurfaceTexture};
 use wasm_bindgen::JsCast;
+use web_sys::console;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::EventLoop,
     window::{WindowBuilder, Window},
     dpi::LogicalSize,
 };
+
+use crate::{synth::{Vco, VcoWaveform}, ui::Frame, util::{Pos, Size, Parent, Transform}};
 
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 480;
@@ -39,6 +47,29 @@ async fn run() {
         Pixels::new_async(WIDTH, HEIGHT, surface_texture).await.unwrap()
     }; 
     
+    let mut world = World::new();
+    
+    let frame = world.spawn((
+        Frame {
+            title: "oscillator".into()
+        },
+        Pos(50, 50),
+        Size(260, 60)
+    ));
+
+    let vco = world.spawn((
+        Vco {
+            waveform: VcoWaveform::Sine,
+            frequency: 440.0,
+            amplitude: 0.5
+        }, 
+        Size(250, 50),
+        Parent {
+            entity: frame,
+            transform: Transform(10, 10)
+        }
+    ));
+    
     event_loop.spawn(move |event, _, control_flow| {
         control_flow.set_wait();
 
@@ -50,9 +81,13 @@ async fn run() {
                 pixels.resize_surface(size.width, size.height).unwrap();
             },
             Event::RedrawRequested(_) => {
+                redraw_world(&mut world, pixels.frame_mut());
+                pixels.render().unwrap();
+
+                /*
                 for (i, pixel) in pixels.frame_mut().chunks_exact_mut(4).enumerate() {
-                    let x = (i % WIDTH as usize) as i16;
-                    let y = (i / WIDTH as usize) as i16;
+                    let x = (i % WIDTH as usize) as u32;
+                    let y = (i / WIDTH as usize) as u32;
 
                     let rgba = if x >= 270 && y >= 190 && x < 370 && y < 290 {
                         [0xe3, 0x7b, 0x8f, 0xff]
@@ -63,12 +98,47 @@ async fn run() {
                     pixel.copy_from_slice(&rgba);
                 }
                 pixels.render().unwrap();
+                */
             },
             _ => ()
         };
         
+        update_world(&world);
         window.request_redraw();
     });
+}
+
+fn redraw_world(world: &mut World, frame: &mut [u8]) {
+    let mut lines = Vec::<(Pos, Pos)>::new();
+
+    // draw frames
+    for (_id, (_frame, pos, size)) in world.query_mut::<(&Frame, &Pos, &Size)>() {
+        lines.push((Pos(pos.0, pos.1), Pos(pos.0 + size.0, pos.1)));
+        lines.push((Pos(pos.0, pos.1), Pos(pos.0, pos.1 + size.1)));
+        lines.push((Pos(pos.0 + size.0, pos.1), Pos(pos.0 + size.0, pos.1 + size.1)));
+        lines.push((Pos(pos.0, pos.1 + size.1), Pos(pos.0 + size.0, pos.1 + size.1)));
+    }
+    
+    console::log_1(&serde_json::to_string(&lines).unwrap().into());
+    
+    for (i, pixel) in frame.chunks_exact_mut(4).enumerate() {
+        let x = (i % WIDTH as usize) as i32;
+        let y = (i / WIDTH as usize) as i32;
+        
+        let rgba = if (&*lines).into_iter().any(
+            |line| x >= line.0.0 && y >= line.0.1 &&
+                   x <= line.1.0 && y <= line.1.1) {
+            [0xe3, 0x7b, 0x8f, 0xff]
+                   } else {
+            [0x15, 0x1e, 0x24, 0xff]
+                   };
+        
+        pixel.copy_from_slice(&rgba);
+    }
+}
+
+fn update_world(world: &World) {
+    // 
 }
 
 fn insert_canvas(window: Rc<Window>) {
